@@ -1,0 +1,3 @@
+[submodule "tner"]
+	path = tner
+	url = git@github.com:qmeeus/tner.git
