@@ -1,14 +1,33 @@
-import editdistance
+"""
+Script for computing label and entity F1 score given a reference file and a prediction file
+This code was adapted from https://github.com/asappresearch/slue-toolkit
+
+The reference and predcition files are expected to be tab-separated text files with header.
+The following columns are expected in the reference file:
+    - id: a unique identifier that correspond to an index in the prediction file
+    - entities: a list of ground truth entity types and phrases as tuples (e.g. [("date", "Friday 13th")])
+    - text (optional): reference text
+
+The following columns are expected in the prediction file:
+    - id: a unique identifier that correspond to an index in the reference file
+    - ner: a list of predicted entity types and phrases as tuples (e.g. [("date", "Friday 13th")])
+    - asr (optional): predicted transcription
+
+The script takes the inner join of the indices of both files. If some indices do not exist, no error is raised.
+
+Example usage:
+python evaluate.py --refs references.tsv --hyps predictions.tsv > results.json
+"""
 import json
+import jiwer
 import numpy as np
 import pandas as pd
 import sys
 
 from pathlib import Path
-from typing import List
 from collections import defaultdict
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
-from typing import Dict, List, Union, Tuple
+from typing import Any, Dict, List, Union, Tuple
 
 
 NamedEntity = Tuple[str, str, int]
@@ -17,7 +36,7 @@ Json = Dict[str, Any]
 whisper_norm = BasicTextNormalizer()
 
 
-def get_ner_scores(all_gt:List[NamedEntity], all_predictions[List[NamedEntity]]) -> Json:
+def get_ner_scores(all_gt:List[NamedEntity], all_predictions:[List[NamedEntity]]) -> Json:
     """
     Evalutes per-label and overall (micro and macro) metrics of precision, recall, and fscore
 
@@ -97,15 +116,6 @@ def get_ner_stats(all_gt:List[NamedEntity], all_predictions:List[NamedEntity]) -
     return stats
 
 
-def safe_divide(numerator:List[Union[int,float]], denominator:List[Union[int,float]]) -> List[float]:
-    numerator = np.array(numerator)
-    denominator = np.array(denominator)
-    mask = denominator == 0.0
-    denominator = denominator.copy()
-    denominator[mask] = 1  # avoid infs/nans
-    return numerator / denominator
-
-
 def ner_error_analysis(all_gt:List[NamedEntity], all_predictions:List[NamedEntity], gt_text) -> Json:
     """
     Print out predictions and GT
@@ -144,6 +154,10 @@ def ner_error_analysis(all_gt:List[NamedEntity], all_predictions:List[NamedEntit
     return analysis_examples_dct
 
 
+def safe_divide(x1, x2):
+    return np.divide(x1, x2, where=x2 != 0)
+
+
 def get_metrics(num_correct, num_gt, num_pred):
     precision = safe_divide([num_correct], [num_pred])
     recall = safe_divide([num_correct], [num_gt])
@@ -157,6 +171,8 @@ def remap_entities(entities):
         new_entities = []
         for tag, entity in entities:
             i = 0
+            tag = tag.replace(" ", "_").lower()
+            entity = whisper_norm(entity)
             while True:
                 if (tag, entity, i) not in new_entities:
                     new_entities.append((tag.replace(" ", "_").lower(), whisper_norm(entity), i))
@@ -176,49 +192,43 @@ def remap_entities(entities):
     return _map(*entities)
 
 
-def eval_ner(prediction_dir_or_file, target_file=None):
+def eval_ner(prediction_file, target_file):
 
-    prediction_dir_or_file = Path(prediction_dir_or_file)
-    if prediction_dir_or_file.is_dir():
-        model_dir = prediction_dir_or_file
-        predictions = pd.concat([
-            pd.read_csv(fn, sep="\t").assign(checkpoint=int(fn.parent.name.split("-")[1]), subset=fn.stem.split("_")[1])
-            for fn in model_dir.rglob("predictions_*.tsv")
-        ], axis=0)
-    else:
-        model_dir = prediction_dir_or_file.parent
-        predictions = pd.read_csv(prediction_dir_or_file, sep="\t").assign(checkpoint=-1, subset="test")
+    expected_columns = ["entities", "ner"]
+    optional_columns = ["text", "asr"]
+    predictions = (
+        pd.read_csv(prediction_file, sep="\t")\
+        .join(pd.read_csv(target_file, sep="\t").set_index("id"), on="id", how="inner")
+    )
 
-    if target_file is not None:
-        assert "id" in predictions.columns
-        target = pd.read_csv(target_file, sep="\t").set_index("id")
-        predictions = predictions.join(target, on="id", how="inner")
+    for column in expected_columns:
+        if column not in predictions.columns:
+            raise ValueError(f"Missing value: {column} ({predictions.columns})")
 
-    if "entities" not in predictions.columns:
-        raise ValueError("Missing target")
+    metrics = {}
 
     all_gt = predictions["entities"].map(remap_entities).tolist()
     all_predictions = predictions["ner"].map(remap_entities).tolist()
-    entity_scores = get_ner_scores(all_gt, all_predictions)
+    metrics["entity"] = get_ner_scores(all_gt, all_predictions)
 
     all_gt_label, all_preds_label = (
         [[(typ, "DUMMY", i) for typ, _, i in entities] for entities in annotations]
         for annotations in (all_gt, all_predictions)
     )
 
-    label_scores = get_ner_scores(all_gt_label, all_preds_label)
+    metrics["label"] = get_ner_scores(all_gt_label, all_preds_label)
 
-    print(json.dumps({"entity": entity_scores, "label": label_scores}, indent=2))
+    if all(column in predictions.columns for column in optional_columns):
+        metrics["wer"] = jiwer.wer(predictions["text"].tolist(), predictions["asr"].tolist())
+
+    print(json.dumps(metrics, indent=2))
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_dir", type=str, default=None)
-    parser.add_argument("--prediction_file", type=str, default=None)
-    parser.add_argument("--target_file", type=str, default=None)
+    parser.add_argument("--hyps", type=str, default=None, required=True)
+    parser.add_argument("--refs", type=str, default=None, required=True)
     args = parser.parse_args()
-    if not (bool(args.model_dir) ^ bool(args.prediction_file)):
-        raise ValueError("Either model_dir or prediction_file should be specified")
-    eval_ner(args.model_dir or args.prediction_file, target_file=args.target_file)
+    eval_ner(args.hyps, args.refs)
 
