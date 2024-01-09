@@ -1,0 +1,37 @@
+O
+B-cardinal number
+B-date
+I-date
+B-person
+I-person
+B-group
+B-geopolitical area
+I-geopolitical area
+B-law
+I-law
+B-organization
+I-organization
+B-percent
+I-percent
+B-ordinal number
+B-money
+I-money
+B-work of art
+I-work of art
+B-facility
+B-time
+I-cardinal number
+B-location
+B-quantity
+I-quantity
+I-group
+I-location
+B-product
+I-time
+B-event
+I-event
+I-facility
+B-language
+I-product
+I-ordinal number
+I-language
