@@ -26,6 +26,7 @@ import sys
 
 from pathlib import Path
 from collections import defaultdict
+from functools import partial
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
 from typing import Any, Dict, List, Union, Tuple
 
@@ -165,17 +166,18 @@ def get_metrics(num_correct, num_gt, num_pred):
     return precision[0], recall[0], fscore[0][0]
 
 
-def remap_entities(entities):
+def remap_entities(entities, normalize=False):
 
     def _map(*entities):
         new_entities = []
         for tag, entity in entities:
             i = 0
             tag = tag.replace(" ", "_").lower()
-            entity = whisper_norm(entity)
+            if normalize:
+                entity = whisper_norm(entity)
             while True:
                 if (tag, entity, i) not in new_entities:
-                    new_entities.append((tag.replace(" ", "_").lower(), whisper_norm(entity), i))
+                    new_entities.append((tag.replace(" ", "_").lower(), entity, i))
                     break
                 i += 1
         return new_entities
@@ -192,13 +194,13 @@ def remap_entities(entities):
     return _map(*entities)
 
 
-def eval_ner(prediction_file, target_file):
+def eval_ner(prediction_file, target_file, entity_column_name="entities", text_column_name="text", normalize=False):
 
-    expected_columns = ["entities", "ner"]
-    optional_columns = ["text", "asr"]
+    expected_columns = [entity_column_name, f"{entity_column_name}_pred"]
+    optional_columns = [text_column_name, f"{text_column_name}_pred"]
     predictions = (
-        pd.read_csv(prediction_file, sep="\t")\
-        .join(pd.read_csv(target_file, sep="\t").set_index("id"), on="id", how="inner")
+        pd.read_csv(prediction_file, sep="\t", index_col=0)
+        .join(pd.read_csv(target_file, sep="\t", index_col=0), lsuffix="_pred", how="right")
     )
 
     for column in expected_columns:
@@ -207,8 +209,9 @@ def eval_ner(prediction_file, target_file):
 
     metrics = {}
 
-    all_gt = predictions["entities"].map(remap_entities).tolist()
-    all_predictions = predictions["ner"].map(remap_entities).tolist()
+    remap_and_normalize = partial(remap_entities, normalize=normalize)
+    all_gt = predictions[entity_column_name].map(remap_and_normalize).tolist()
+    all_predictions = predictions[f"{entity_column_name}_pred"].map(remap_and_normalize).tolist()
     metrics["entity"] = get_ner_scores(all_gt, all_predictions)
 
     all_gt_label, all_preds_label = (
@@ -219,7 +222,11 @@ def eval_ner(prediction_file, target_file):
     metrics["label"] = get_ner_scores(all_gt_label, all_preds_label)
 
     if all(column in predictions.columns for column in optional_columns):
-        metrics["wer"] = jiwer.wer(predictions["text"].tolist(), predictions["asr"].tolist())
+        refs, hyps = predictions[text_column_name], predictions[f"{text_column_name}_pred"]
+        if normalize:
+            refs = refs.map(whisper_norm)
+            hyps = hyps.map(whisper_norm)
+        metrics["wer"] = jiwer.wer(reference=refs.tolist(), hypothesis=hyps.tolist())
 
     print(json.dumps(metrics, indent=2))
 
@@ -229,6 +236,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--hyps", type=str, default=None, required=True)
     parser.add_argument("--refs", type=str, default=None, required=True)
+    parser.add_argument("--entity_column_name", type=str, default="entities")
+    parser.add_argument("--text_column_name", type=str, default="text")
+    parser.add_argument("--normalize", action="store_true", default=False)
     args = parser.parse_args()
-    eval_ner(args.hyps, args.refs)
+    eval_ner(args.hyps, args.refs, args.entity_column_name, args.text_column_name, args.normalize)
 
