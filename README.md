@@ -8,6 +8,15 @@ The entities must be formatted as follows: `[('ENTITY_TYPE1', 'ENTITY_STRING1'),
 The column names in the TSV file can be passed to the script with `--text_column_name` and `--entity_column_name` (defaults to `text` and `entities`).
 Refer to the code for additional information.
 
+Example:
+```
+$ head predictions/nl/targets.tsv
+audio_id        sentence        entities
+20110705-0900-PLENARY-8-nl_20110705-16:29:24_6   En daar die eigen middelen het ook mogelijk maken om de bijdragen van de staten te verminderen, is het meteen ook een manier om bij te dragen tot hun begroting.       []
+20170201-0900-PLENARY-9-nl_20170201-16:51:24_8   Je hebt een zeer goede en sterke Europese gedreven governance nodig en ook op dat punt zullen wij samen met de andere fracties versterkte voorstellen indienen.        [('group', 'Europese')]
+20090504-0900-PLENARY-13-nl_20090504-21:08:18_3  Tegen die achtergrond vindt het voornemen dat nu in de Ministerraad is geuit, om niet alleen de zelfstandige bestuurder uit te sluiten van de werkingssfeer, maar ook om niets afdoende te doen tegen de schijnzelfstandigen, in de ogen van de PSE Fractie geen genade.       [('organization', 'Ministerraad'), ('organization', 'PSE Fractie')]
+```
+
 ## Usage
 ```bash
 $ python src/evaluate.py \
