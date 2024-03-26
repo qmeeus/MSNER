@@ -17,6 +17,23 @@ audio_id        sentence        entities
 20090504-0900-PLENARY-13-nl_20090504-21:08:18_3  Tegen die achtergrond vindt het voornemen dat nu in de Ministerraad is geuit, om niet alleen de zelfstandige bestuurder uit te sluiten van de werkingssfeer, maar ook om niets afdoende te doen tegen de schijnzelfstandigen, in de ogen van de PSE Fractie geen genade.       [('organization', 'Ministerraad'), ('organization', 'PSE Fractie')]
 ```
 
+A simple method for generating the file in the right format from the provided json files:
+```python
+import json
+
+def join(x):
+    return "".join(x).strip()
+
+with open("targets.tsv", "w") as outfile:
+    print("\t".join(["audio_id", "text", "entities"]), file=outfile)
+    with open("data/transcript-de-test-ann-ontonotes-v1.jsonl") as infile:
+        for line in f.readlines():
+            data = json.loads(line)
+            text = join(data["input"])
+            entities = str([(annot["type"], join(annot["entity"])) for annot in data["annotation"]])])
+            print("\t".join([data["id"], text, entities, file=outfile)
+```
+
 ## Usage
 ```bash
 $ python src/evaluate.py \
